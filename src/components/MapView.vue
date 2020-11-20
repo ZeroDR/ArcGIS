@@ -1,17 +1,19 @@
 <template>
     <div class="home-panel">
         <div class="map-panel"></div>
+        <PopupInfoWindow :type="type" ref="popupInfo" v-if="visibleInfoWindow"></PopupInfoWindow>
     </div>
 </template>
 
 <script>
 import { loadModules } from 'esri-loader';
+import PopupInfoWindow from '@/components/PopupInfoWindow'
 import Axios from 'axios'
 
 export default {
     name: 'MapView',
     props: ['title'],
-    components:{},
+    components:{PopupInfoWindow},
     data() {
         return {
             visibleInfoWindow:true,
@@ -41,6 +43,52 @@ export default {
                 zoom: 5
             });
 
+            let geoJsonLayer = new GeoJSONLayer({
+                url:'static/data/polygon_source.json',
+                displayField:'name',
+                labelsVisible:true
+            });
+            // _this.map.add(geoJsonLayer);
+
+            // geoJsonLayer.load().then(res=>{
+            //     _this.view.goTo(res.fullExtent);
+            // });
+
+            let source = {
+                            data:{},
+                            options:{
+                                layerId:'arcgis_polygon',
+                                fitBounds:false,
+                                style:{
+                                    stroke:true,
+                                    strokeStyle:'solid',
+                                    strokeDasharray:[0,0,0],
+                                    strokeColor:'#ff0',
+                                    weight:'2',
+                                    strokeOpacity:0.5,
+                                    fill:true,
+                                    fillColor:'#f0f',
+                                    fillOpacity:'0.5',
+                                    clickCallback:()=>{},				
+                                },
+                                label:{
+                                    field:'name',
+                                    color:'#f00',
+                                    weight:'normal',
+                                    fontSize:12
+                                }
+                            }
+                        };
+
+            // Axios.get('static/data/polygon_source.json').then(response=>{
+            //     if(response.status === 200){
+            //         source.data = response.data;
+            //         this.addPolygons(source,GraphicsLayer,Graphic,PopupTemplate);
+            //     }
+            //     console.log(response);
+            // });
+            // this.addPolygons();
+
             let heat_source = {
                 data:[{
                     lng:'',
@@ -68,13 +116,110 @@ export default {
                     this.loadHeatLayer(heat_source);
                 }
             }).catch(ex=>{console.error(ex);})
+
+            this.view.on('click',(event)=>{
+                
+            });
         });
     },
     methods: {
+        addPolygons(source,GraphicsLayer,Graphic,PopupTemplate){
+            const _this = this;
+            let polygon = {type:'polygon',rings:[[[116.40975952148438,39.65857056750545],[116.47293090820312,39.449979918847724],[116.89865112304688,39.51569536664156],[116.76406860351561,39.77371401334739],[116.50863647460938,39.76738084178371],[116.40975952148438,39.65857056750545]]]};
+            let polygon1 = {type:'polygon',rings:source.data.features[0].geometry.coordinates[0]};
+            console.log(polygon1);
+            console.log(polygon);
+            let options = source.options;
+            let fullColor = this.hexToRgb(options.style.fillColor);
+            fullColor.push(options.style.fillOpacity);
+            let outLineColor = this.hexToRgb(options.style.strokeColor);
+            outLineColor.push(options.style.strokeOpacity);
+
+            let features = [];
+            let labelLayer = [];
+            source.data.features.forEach((feature)=>{
+                let rings = (coordinates)=>{
+                    let rtValue = coordinates[0];
+                    if(coordinates.length > 1){
+                        coordinates.forEach((geo,index)=>{
+                            index > 0 && rtValue.push(...geo);
+                        });
+                    }
+                    return rtValue;
+                };
+                let gl = new Graphic({
+                    geometry:{
+                        type:'polygon',
+                        rings:rings(feature.geometry.coordinates)
+                    },
+                    symbol:{
+                        type:'simple-fill',
+                        color:fullColor || [255,0,0,1],
+                        outline:{
+                            color:outLineColor || '#000',
+                            width:options.weight
+                        }
+                    },
+                    properties:feature.properties,
+                    popupTemplate:new PopupTemplate({
+                        title:'',
+                        content:(feature)=>{
+                            _this.type = parseInt(Math.random()*100);
+                            console.log(feature);
+                            return _this.$refs.popupInfo.$el//`<div style="width:320px;height:auto;" class="pall" id="popupinfowindow">13</div>`//
+                        }
+                    })
+                });
+                let centerPoint = gl.geometry.extent.center;
+
+                let lbl = new Graphic({
+                    geometry:centerPoint,
+                    symbol:{
+                        type:'text',
+                        color:options.label.color,
+                        text:feature.properties[options.label.field] || '',
+                        font:{
+                            size:options.label.size,
+                            family:'Josefin Slab',
+                            weight:options.label.weight
+                        }
+                    }
+                });
+
+                labelLayer.push(lbl);
+                features.push(gl);
+            });
+            let polygonGraphic = new GraphicsLayer({
+                graphics:features
+            });
+            let labelGraphic = new GraphicsLayer({
+                graphics:labelLayer
+            });
+
+            this.map.add(polygonGraphic);
+            this.map.add(labelGraphic);
+        },
+
+        //十六进制转十进制
+        hexToDec(hex){
+            return parseInt(hex,16).toString();
+        },
+
+        //十六进制转RGB
+        hexToRgb(hex){
+            hex = hex.substring(1);
+            if(hex.length === 3){
+                hex = hex[0].repeat(2)+hex[1].repeat(2)+hex[2].repeat(2);
+            }
+            return [this.hexToDec(hex.substring(0,2)),this.hexToDec(hex.substring(2,4)),this.hexToDec(hex.substring(4))];
+        },
+
         loadHeatLayer(source){
             const _this = this;
             let fs = [];
             source.data.forEach(item=>{
+                // let x = 116.37 + this.getRandom();
+                // let y = 36.67 + this.getRandom();
                 fs.push({
                     geometry:{
                         type:'point',
@@ -118,25 +263,17 @@ export default {
                 });
 
                 _this.map.add(fl);
-
-                setTimeout(()=>{
-                    _this.map.remove(fl);
-                },1000*60);
             });
         },
 
         getRandom(){
             return parseFloat((Math.random() > 0.5 ? Math.random() : +('-'+Math.random())).toFixed(3));
-        },
-
-        removeLayer(layer){
-            this.map.remove(layer);
         }
     },
     beforeDestroy() {
         if (this.view) {
         // destroy the map view
-            this.view.destroy();
+        this.view.destroy();
         }
     }
 }
